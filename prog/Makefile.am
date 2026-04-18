@@ -112,7 +112,7 @@ OTHER_PROGS = adaptmap_dark \
 	reducetest removecmap \
 	renderfonts replacebytes \
 	rotatefastalt rotate_it \
-	rotateorthtest1 rotatetest1 \
+	rotateorthpdf rotateorthtest1 rotatetest1 \
 	runlengthtest scaleandtile scaleimages \
 	scale_it scaletest1 scaletest2 \
 	seedfilltest settest sharptest \

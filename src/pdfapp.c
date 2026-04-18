@@ -69,6 +69,12 @@
  *
  *     Cleanup and binarization of images for prog/cleanpdf
  *          l_int32          cleanTo1bppFilesToPdf()
+ *
+ *     Orthogonal rotation of images for prog/rotateorthpdf
+ *          l_int32          rotateorthFilesToPdf()
+ *
+ *     Static helpers
+ *          NUMA            *parseRotationString()
  * </pre>
  */
 
@@ -78,6 +84,10 @@
 
 #include <string.h>
 #include "allheaders.h"
+
+static NUMA *parseRotationString(l_int32  n, const char *rotstring);
+
+#define DEBUG_PARSER 0
 
 
 /* --------------------------------------------*/
@@ -489,6 +499,253 @@ PIXAC     *pixac1 = NULL;
     }
     return 0;
 }
+
+
+/*---------------------------------------------------------------------*
+ *         Orthogonal rotation of images for prog/rotateorthpdf        *
+ *---------------------------------------------------------------------*/
+/*!
+ * \brief   rotateorthFilesToPdf()
+ *
+ * \param[in]    sa            sorted full pathnames of images
+ * \param[in]    rotstring     determines which images are to be rotated
+ * \param[in]    scalefactor   scaling factor applied to each image; (0.0...2.0]
+ * \param[in]    quality       for jpeg: 0 for default (75); otherwise 25 - 95.
+ * \param[in]    title         [optional] pdf title; can be null
+ * \param[in]    fileout       pdf file of all images
+ * \return  0 if OK, 1 on error
+ *
+ * <pre>
+ * Notes:
+ *    (1) This function rotates selected images and wraps them in a pdf in
+ *        the order given in the input %sa.
+ *    (2) It does the image processing for prog/rotateorthpdf.c.
+ *    (3) The %rotstring has three modes:
+ *        mode 1: a list of integers in [0,1,2,3] for 90 degree cw rotations;
+ *                only need to list up to last non-zero rotation
+ *        mode 2: a 4, followed by one integer, to rotate all images by the
+ *                same amount
+ *        mode 3: a 5, followed by parenthesized comma-separated pairs
+ *                of numbers: (page, rotation).
+ *        Note that page numbers are 0-based (e.g., the first page is page 0)
+ *    (4) Images in the output pdf are encoded with jpeg (DCT).
+ *    (5) Typically, %scalefactor <= 1.0.  It is applied to each image
+ *        before encoding.  If you enter a value <= 0.0, it will be set to 1.0.
+ *        The maximum allowed value is 2.0.  Using a value < 1.0 results in
+ *        lower resolution in the images in the output pdf.
+ *    (6) Default jpeg %quality is 75; otherwise, quality factors between
+ *        25 and 95 are enforced.
+ * </pre>
+ */
+l_ok
+rotateorthFilesToPdf(SARRAY      *sa,
+                     const char  *rotstring,
+                     l_float32    scalefactor,
+                     l_int32      quality,
+                     const char  *title,
+                     const char  *fileout)
+{
+char      *fname;
+l_int32    n, i, res, maxi, rotval;
+l_int32    maxsmallset = 25;  /* max num images kept uncompressed in array */
+NUMA      *na1;
+PIX       *pixs, *pix1, *pix2, *pix3;
+PIXA      *pixa1 = NULL;
+PIXAC     *pixac1 = NULL;
+
+    if (!sa)
+        return ERROR_INT("sa not defined", __func__, 1);
+    if (!fileout)
+        return ERROR_INT("fileout not defined", __func__, 1);
+    if (scalefactor <= 0) scalefactor = 1.0;
+    if (scalefactor > 2.0) {
+        L_WARNING("scalefactor %f too big; setting to 2.0\n", __func__,
+                  scalefactor);
+        scalefactor = 2.0;
+    }
+    if (quality <= 0) quality = 75;  /* default value */
+    if (quality < 25) {
+        L_WARNING("quality %d too low; setting to 25\n", __func__, quality);
+        quality = 25;
+    }
+    if (quality > 95) {
+        L_WARNING("quality %d too high; setting to 95\n", __func__, quality);
+        quality = 95;
+    }
+    if ((n = sarrayGetCount(sa)) == 0)
+        return ERROR_INT("sa is empty", __func__, 1);
+    if ((na1 = parseRotationString(n, rotstring)) == NULL)
+        return ERROR_INT("invalid rotstring", __func__, 1);
+    maxi = numaGetCount(na1);
+
+#if DEBUG_PARSER
+    {
+    NUMA *na = parseRotationString(17, "5(3,2)##,(2,5);;(7,2)(92)(\
+                                  ((12,-2)((14,3)(8,1)xy(-7,2)z(23,1)");
+    numaWrite("/tmp/lept/debug.na", na);
+    numaDestroy(&na);
+    }
+#endif  /* DEBUG_PARSER */
+
+    if (n <= maxsmallset)
+        pixa1 = pixaCreate(n);
+    else
+        pixac1 = pixacompCreate(n);
+    for (i = 0; i < n; i++) {
+        if (i == 0)
+            lept_stderr("page: ");
+        if (n < 12) {
+            lept_stderr("%d . ", i);
+        } else {
+            if (i && (i % 10 == 0))
+                lept_stderr("%d . ", i);
+        }
+        fname = sarrayGetString(sa, i, L_NOCOPY);
+        pixs = pixRead(fname);
+        pix1 = pixRemoveColormap(pixs, REMOVE_CMAP_BASED_ON_SRC);
+        if (i <= maxi) {
+            numaGetIValue(na1, i, &rotval);
+            if (rotval == 0)
+                pix2 = pixClone(pix1);
+            else
+                pix2 = pixRotateOrth(pix1, rotval);
+        } else {
+            pix2 = pixClone(pix1);
+        }
+        pix3 = pixScale(pix2, scalefactor, scalefactor);
+        if (n <= maxsmallset) {
+            pixaAddPix(pixa1, pix3, L_INSERT);
+        } else {
+            pixacompAddPix(pixac1, pix3, IFF_DEFAULT);
+            pixDestroy(&pix3);
+        }
+        pixDestroy(&pixs);
+        pixDestroy(&pix1);
+        pixDestroy(&pix2);
+    }
+
+        /* Generate the pdf.  Infer the input resolution from the first
+         * image, assuming the longest side is (scalefactor * 11.0) inches.
+         * Then if the first image in the output is printed, the longest
+         * side will be (scalefactor * 11.0) inches, regardless of the
+         * resolution of the printer.  The other images, if printed, will
+         * be sized relative to the first image by the ratio of their
+         * longest side to the longest side of the first image.  */
+    lept_stderr("\nWrite output to %s\n", fileout);
+    if (n <= maxsmallset)
+        pix1 = pixaGetPix(pixa1, 0, L_CLONE);
+    else
+        pix1 = pixacompGetPix(pixac1, 0);
+    pixInferResolution(pix1, scalefactor * 11.0, &res);
+    pixDestroy(&pix1);
+    if (strcmp(title, "none") == 0)
+        title = NULL;
+    if (n <= maxsmallset) {
+        pixaConvertToPdf(pixa1, res, 1.0, L_DEFAULT_ENCODE, quality,
+                         title, fileout);
+        pixaDestroy(&pixa1);
+    } else {
+        pixacompConvertToPdf(pixac1, res, 1.0, L_DEFAULT_ENCODE,
+                             quality, title, fileout);
+        pixacompDestroy(&pixac1);
+    }
+    return 0;
+}
+
+
+/*!
+ * \brief   parseRotationString()
+ *
+ * \param[in]    n            number of images
+ * \param[in]    rotstring    specifies orthogonal rotations of the images
+ * \return  numa   containing the rotation values, or NULL on error
+ *
+ * <pre>
+ * Notes:
+ *    (1) The %rotstring has three modes:
+ *        (a) a list of integers in [0,1,2,3] for 90 degree cw rotations;
+ *            only need to list up to last non-zero rotation
+ *        (b) a 4, followed by one integer, to rotate all images by the
+ *            same amount
+ *        (c) a 5, followed by parenthesized comma-separated pairs
+ *            of numbers: (page, rotation).
+ *    (2) The returned numa has the rotation value for each image; a value
+ *        of 0 means no rotation.
+ *    (3) Examples of input rotstring:
+ *        Mode 1: "22000003113"
+ *        Mode 2: "42"
+ *        Mode 3: "5(3,2)(2,1)(14,3)(8,1)(23,1)"   or (with separators)
+ *                "5::(3,2),(2,1)##(14,3);;(8,1)(23,1)"
+ *            Note: (1) arbitrary separators can be put between
+ *                      parenthesized pairs without affecting the result
+ *                  (2) the page order of parenthesized pairs does not matter
+ *    (4) Invalid pairs in mode 3, where the page index is larger than n-1,
+ *        or the rotation number is invalid, are ignored with a warning.
+ *    (5) This function can be tested by defining DEBUG_PARSER to be 1.
+ * </pre>
+ */
+static NUMA *
+parseRotationString(l_int32      n,
+                    const char  *rotstring)
+{
+l_int32  ret, i, len, rotval, mode, maxn, loc, ipair, npair, index;
+L_DNA   *dna;
+NUMA    *na;
+
+    if (!rotstring)
+        return (NUMA *)ERROR_PTR("rotstring not defined", __func__, NULL);
+    if ((len = strlen(rotstring)) == 0)
+        return (NUMA *)ERROR_PTR("rotstring length == 0", __func__, NULL);
+    rotval = rotstring[0] - 0x30;
+    if (rotval >= 0 && rotval <= 3)
+        mode = 1;
+    else if (rotval == 4)
+        mode = 2;
+    else if (rotval == 5)
+        mode = 3;
+    else
+        return (NUMA *)ERROR_PTR("invalid rotstring mode", __func__, NULL);
+
+    if ((na = numaMakeConstant(0, n)) == NULL)
+        return (NUMA *)ERROR_PTR("na not made for n = %d", __func__, NULL);
+    if (mode == 1) {
+        maxn = L_MIN(len, n);
+        for (i = 0; i < maxn; i++)
+            numaSetValue(na, i, rotstring[i] - 0x30);
+    } else if (mode == 2) {
+        for (i = 0; i < n; i++)
+            numaSetValue(na, i, rotstring[1] - 0x30);
+    } else {  /* mode 3; data can be in any order of image index */
+         dna = stringFindEachSubstr(rotstring, "(");
+         npair = l_dnaGetCount(dna);
+         for (ipair = 0; ipair < npair; ipair++) {
+             l_dnaGetIValue(dna, ipair, &loc);
+             if (loc > len - 5) {
+                  L_ERROR("invalid loc value = %d\n", __func__, loc);
+                  continue;
+             }
+             ret = sscanf(&rotstring[loc], "(%d,%d)", &index, &rotval);
+             if (ret != 2) {
+                  L_ERROR("invalid pair for loc = %d\n", __func__, loc);
+                  continue;
+             }
+             if (index < 0 || index >= n) {
+                  L_ERROR("invalid index = %d >= nimages = %d\n", __func__,
+                          index, n);
+                  continue;
+             }
+             if (rotval < 0 || rotval > 3) {
+                  L_ERROR("invalid rotval = %d at index = %d\n", __func__,
+                          rotval, index);
+                  continue;
+             }
+             numaSetValue(na, index, rotval);
+         }
+         l_dnaDestroy(&dna);
+    }
+    return na;
+}
+
 
 /* --------------------------------------------*/
 #endif  /* USE_PDFIO */

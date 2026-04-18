@@ -341,6 +341,7 @@ void build(Solution &s)
             {"replacebytes", {"replacebytes.c"}},
             {"rotatefastalt", {"rotatefastalt.c"}},
             {"rotate_it", {"rotate_it.c"}},
+            {"rotateorthpdf", {"rotateorthpdf.c"}},
             {"rotateorthtest1", {"rotateorthtest1.c"}},
             {"rotateorth_reg", {"rotateorth_reg.c"}},
             {"rotatetest1", {"rotatetest1.c"}},

@@ -1409,6 +1409,7 @@ LEPT_DLL extern BOXA * boxaPruneSortedOnOverlap ( BOXA *boxas, l_float32 maxover
 LEPT_DLL extern l_ok compressFilesToPdf ( SARRAY *sa, l_int32 onebit, l_int32 savecolor, l_float32 scalefactor, l_int32 quality, const char *title, const char *fileout );
 LEPT_DLL extern l_ok cropFilesToPdf ( SARRAY *sa, l_int32 lr_clear, l_int32 tb_clear, l_int32 edgeclean, l_int32 lr_border, l_int32 tb_border, l_float32 maxwiden, l_int32 printwiden, const char *title, const char *fileout );
 LEPT_DLL extern l_ok cleanTo1bppFilesToPdf ( SARRAY *sa, l_int32 res, l_int32 contrast, l_int32 rotation, l_int32 opensize, const char *title, const char *fileout );
+LEPT_DLL extern l_ok rotateorthFilesToPdf ( SARRAY *sa, const char *rotstring, l_float32 scalefactor, l_int32 quality, const char *title, const char *fileout );
 LEPT_DLL extern l_ok convertFilesToPdf ( const char *dirname, const char *substr, l_int32 res, l_float32 scalefactor, l_int32 type, l_int32 quality, const char *title, const char *fileout );
 LEPT_DLL extern l_ok saConvertFilesToPdf ( SARRAY *sa, l_int32 res, l_float32 scalefactor, l_int32 type, l_int32 quality, const char *title, const char *fileout );
 LEPT_DLL extern l_ok saConvertFilesToPdfData ( SARRAY *sa, l_int32 res, l_float32 scalefactor, l_int32 type, l_int32 quality, const char *title, l_uint8 **pdata, size_t *pnbytes );
