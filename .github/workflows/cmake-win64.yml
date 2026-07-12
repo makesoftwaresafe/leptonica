@@ -28,7 +28,7 @@ jobs:
       - name: Get the version
         id: get_version
         run: |
-             $git_info=$(git describe --tags HEAD)
+             $git_info=$(git describe --tags --always HEAD)
              echo "version=${git_info}" >> $env:GITHUB_OUTPUT
       - name: Setup Installation Location
         run: |
